@@ -1,0 +1,12 @@
+[project]
+name = "whisperrr"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "googletrans>=4.0.2",
+    "tqdm>=4.67.1",
+    "whisper>=1.1.10",
+    "yt-dlp>=2025.6.25",
+]
