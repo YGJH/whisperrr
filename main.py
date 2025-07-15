@@ -14,7 +14,7 @@ import time
 
 from yt_dlp import YoutubeDL
 
-def download_audio(url, output_file="audio.mp3"):
+def download_audio(url, output_file="audio"):
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_file,
@@ -32,6 +32,13 @@ def download_audio(url, output_file="audio.mp3"):
         return True
     except Exception as e:
         print(f"Download failed: {e}")
+        try:
+            cmd = f'uv run yt-dlp --output \"audio.mp3\" --embed-thumbnail \
+            --add-metadata --extract-audio --audio-format mp3 --audio-quality 320K \"{url}\"'
+            subprocess.run(cmd, shell=True, check=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Fallback download failed: {e}")
         return False
 def convert_mp4_to_audio(video_path, output_file="audio.mp3"):
     """Convert MP4 to audio using ffmpeg"""
@@ -78,22 +85,135 @@ async def translate_texts_batch(texts, dest='zh-TW', batch_size=10):
     
     return all_translations
 
+
+def gen_summary():
+    try:
+        print("api key = ", os.getenv('GEMINI_API_KEY'))
+        import google.generativeai as genai
+        print("import successful")
+        genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+        
+        model = genai.GenerativeModel('gemini-2.5-pro')
+        
+        with open('transcribe.txt', 'r', encoding='utf-8') as f:
+            text = f.read()
+
+        print("Generating summary...")
+        prompt = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
+        response = model.generate_content(prompt)
+
+        with open('summary.txt', 'w', encoding='utf-8') as f:
+            f.write(response.text)
+        print("Summary generated and saved to summary.txt")
+        return True
+    except Exception as e:
+        print(f"Gemini API failed: {e}")
+        try:
+            print("Trying Ollama fallback...")
+            import torch
+            if torch.cuda.is_available():
+                from ollama import Ollama
+                client = Ollama()
+                with open('transcribe.txt', 'r', encoding='utf-8') as f:
+                    text = f.read()
+                print("Generating summary with Ollama...")
+                text = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
+                response = client.chat(
+                    model="deepseek-r1:7b",
+                    messages=[{"role": "user", "content": text}],
+                    max_tokens=1000,
+                    temperature=0.5
+                )
+                with open('summary.txt', 'w', encoding='utf-8') as f:
+                    f.write(response['message']['content'])
+                print("Summary generated and saved to summary.txt")
+                return True
+            else:
+                print("CUDA not available, trying CPU-based summary...")
+                # Simple fallback - create a basic summary from the transcription
+                with open('transcribe.txt', 'r', encoding='utf-8') as f:
+                    text = f.read()
+                
+                # Create a simple summary by taking first few lines and key points
+                lines = text.split('\n')
+                summary_lines = []
+                summary_lines.append("=== 影片內容摘要 ===")
+                summary_lines.append("(由於API限制，這是基於轉錄文字的簡單摘要)")
+                summary_lines.append("")
+                
+                # Take first 5 lines as introduction
+                for i, line in enumerate(lines[:5]):
+                    if line.strip():
+                        summary_lines.append(f"• {line.strip()}")
+                
+                summary_lines.append("")
+                summary_lines.append("=== 主要內容 ===")
+                
+                # Take some key lines from the middle and end
+                mid_point = len(lines) // 2
+                for i in range(mid_point, min(mid_point + 3, len(lines))):
+                    if lines[i].strip():
+                        summary_lines.append(f"• {lines[i].strip()}")
+                
+                if len(lines) > 10:
+                    summary_lines.append("")
+                    summary_lines.append("=== 結論部分 ===")
+                    for line in lines[-3:]:
+                        if line.strip():
+                            summary_lines.append(f"• {line.strip()}")
+                
+                summary_text = '\n'.join(summary_lines)
+                with open('summary.txt', 'w', encoding='utf-8') as f:
+                    f.write(summary_text)
+                print("Basic summary generated and saved to summary.txt")
+                return True
+        except Exception as e2:
+            print(f"Ollama fallback also failed: {e2}")
+            print("Creating basic summary from transcription...")
+            try:
+                with open('transcribe.txt', 'r', encoding='utf-8') as f:
+                    text = f.read()
+                
+                lines = text.split('\n')
+                summary_lines = []
+                summary_lines.append("=== 影片內容摘要 ===")
+                summary_lines.append("(自動生成的基本摘要)")
+                summary_lines.append("")
+                
+                for i, line in enumerate(lines):
+                    if line.strip() and i % 3 == 0:  # Take every 3rd line
+                        summary_lines.append(f"• {line.strip()}")
+                
+                summary_text = '\n'.join(summary_lines)
+                with open('summary.txt', 'w', encoding='utf-8') as f:
+                    f.write(summary_text)
+                print("Basic summary generated and saved to summary.txt")
+                return True
+            except Exception as e3:
+                print(f"All summary generation methods failed: {e3}")
+                return False
+
 def main():
     # Fix for Windows event loop policy
+    import argparse
+    summary = False
+    parser = argparse.ArgumentParser(description="Transcribe and translate audio from video files.")
+    parser.add_argument('--summary', action='store_true', help="Generate summary of the transcription")
+    parser.add_argument('--video', nargs='?', help="Video URL or file path to transcribe")
+    args = parser.parse_args()
+    video = args.video
+    summary = args.summary
+
     if sys.platform.startswith('win'):
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    
-    if len(sys.argv) < 2:
-        print("Usage: python main.py <video_url_or_file>")
-        sys.exit(1)
-    
-    video = sys.argv[1]
+
+    print(f"Summary mode: {summary}")
     print(f"Processing: {video}")
     
     # Initialize model
     print("Loading Whisper model...")
     model = whisper.load_model("turbo")
-    
+    print('loading whisper model done')
     # Handle different input types
     audio_file = None
     
@@ -173,6 +293,24 @@ def main():
         
         print("Transcription complete! Full text saved to transcription.txt")
     
+    with open('chinese.txt', 'w', encoding='utf-8') as f:
+        if skip_translation:
+            for idx, original in enumerate(texts):
+                f.write(f"{original}\n")
+        else:
+            for idx, original in enumerate(texts):
+                f.write(f"{translations[idx]}\n")
+
+    with open('transcribe.txt', 'a', encoding='utf-8') as f:
+        for idx, original in enumerate(texts):
+            f.write(f"{original}\n")
+
+    
+    if summary:
+        print("Generating summary...")
+        gen_summary()
+
+
     # Clean up temporary audio file if it was downloaded/converted
     if audio_file in ["audio.mp3"] and audio_file != video:
         try:
