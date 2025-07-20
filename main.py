@@ -33,8 +33,9 @@ def download_audio(url, output_file="audio"):
     except Exception as e:
         print(f"Download failed: {e}")
         try:
-            cmd = f'uv run yt-dlp --output \"audio.mp3\" --embed-thumbnail \
-            --add-metadata --extract-audio --audio-format mp3 --audio-quality 320K \"{url}\"'
+            print("Trying fallback with yt-dlp...")
+            cmd = f'uv run yt-dlp --output \"audio.mp3\" --embed-thumbnail --extract-audio --audio-format mp3 --audio-quality 320K {url}'
+            # cmd = cmd.split()
             subprocess.run(cmd, shell=True, check=True)
             return True
         except subprocess.CalledProcessError as e:
@@ -102,9 +103,9 @@ def gen_summary():
         prompt = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
         response = model.generate_content(prompt)
 
-        with open('summary.txt', 'w', encoding='utf-8') as f:
+        with open('summary.md', 'w', encoding='utf-8') as f:
             f.write(response.text)
-        print("Summary generated and saved to summary.txt")
+        print("Summary generated and saved to summary.md")
         return True
     except Exception as e:
         print(f"Gemini API failed: {e}")
@@ -124,9 +125,9 @@ def gen_summary():
                     max_tokens=1000,
                     temperature=0.5
                 )
-                with open('summary.txt', 'w', encoding='utf-8') as f:
+                with open('summary.md', 'w', encoding='utf-8') as f:
                     f.write(response['message']['content'])
-                print("Summary generated and saved to summary.txt")
+                print("Summary generated and saved to summary.md")
                 return True
             else:
                 print("CUDA not available, trying CPU-based summary...")
@@ -163,9 +164,9 @@ def gen_summary():
                             summary_lines.append(f"• {line.strip()}")
                 
                 summary_text = '\n'.join(summary_lines)
-                with open('summary.txt', 'w', encoding='utf-8') as f:
+                with open('summary.md', 'w', encoding='utf-8') as f:
                     f.write(summary_text)
-                print("Basic summary generated and saved to summary.txt")
+                print("Basic summary generated and saved to summary.md")
                 return True
         except Exception as e2:
             print(f"Ollama fallback also failed: {e2}")
@@ -185,9 +186,9 @@ def gen_summary():
                         summary_lines.append(f"• {line.strip()}")
                 
                 summary_text = '\n'.join(summary_lines)
-                with open('summary.txt', 'w', encoding='utf-8') as f:
+                with open('summary.md', 'w', encoding='utf-8') as f:
                     f.write(summary_text)
-                print("Basic summary generated and saved to summary.txt")
+                print("Basic summary generated and saved to summary.md")
                 return True
             except Exception as e3:
                 print(f"All summary generation methods failed: {e3}")
@@ -218,6 +219,14 @@ def main():
     audio_file = None
     
     if video.startswith("http://") or video.startswith("https://"):
+        # https://www.youtube.com/watch?v=Vz40rDiWnN8&t=150s
+        video = video.replace('\\' , '').strip()
+        print(video)
+        if '?v' in video:
+            video = "https://www.youtube.com/watch?v" + video.split('?v')[-1]
+        if '&' in video:
+            video = video.split('&')[0]
+        print(f"Downloading audio from URL: {video}")
         if download_audio(video):
             audio_file = "audio.mp3"
         else:
@@ -240,7 +249,7 @@ def main():
         sys.exit(1)
     
     # Transcribe audio
-    print("Transcribing audio...")
+    print(f"Transcribing audio... {audio_file}")
     try:
         result = model.transcribe(audio_file, fp16=False, verbose=False)
     except Exception as e:
@@ -301,7 +310,7 @@ def main():
             for idx, original in enumerate(texts):
                 f.write(f"{translations[idx]}\n")
 
-    with open('transcribe.txt', 'a', encoding='utf-8') as f:
+    with open('transcribe.txt', 'w', encoding='utf-8') as f:
         for idx, original in enumerate(texts):
             f.write(f"{original}\n")
 
@@ -312,12 +321,12 @@ def main():
 
 
     # Clean up temporary audio file if it was downloaded/converted
-    if audio_file in ["audio.mp3"] and audio_file != video:
-        try:
-            os.remove(audio_file)
-            print("Cleaned up temporary audio file")
-        except:
-            pass
+    # if audio_file in ["audio.mp3"] and audio_file != video:
+    #     try:
+    #         os.remove(audio_file)
+    #         print("Cleaned up temporary audio file")
+    #     except:
+    #         pass
 
 if __name__ == "__main__":
     main()
