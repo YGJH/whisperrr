@@ -201,13 +201,16 @@ def main():
     parser = argparse.ArgumentParser(description="Transcribe and translate audio from video files.")
     parser.add_argument('--summary', action='store_true', help="Generate summary of the transcription")
     parser.add_argument('--video', nargs='?', help="Video URL or file path to transcribe")
+    parser.add_argument('--copy', action='store_true', help='copy summary to pcloud')
+    
     args = parser.parse_args()
     video = args.video
     summary = args.summary
-
+    copy = args.copy
     if sys.platform.startswith('win'):
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
+    
+    print(f"copy mode: {copy}")
     print(f"Summary mode: {summary}")
     print(f"Processing: {video}")
     
@@ -318,8 +321,12 @@ def main():
     if summary:
         print("Generating summary...")
         gen_summary()
-
-
+    if copy:
+        path = os.getenv('pCloud_Path')
+        print(f'copy summary.md to {path}')
+        cmd = 'cp summary.md ' + path + 'documents/obsidian/summary.md'  
+        print(cmd)
+        subprocess.run(cmd, shell=True, check=True)
     # Clean up temporary audio file if it was downloaded/converted
     # if audio_file in ["audio.mp3"] and audio_file != video:
     #     try:
