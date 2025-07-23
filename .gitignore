@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+*.webp
 *.mp3
 *.mp4
 *.wav
