@@ -17,4 +17,4 @@ if '&' in url:
 
 print(f"{GREEN}downloading: {url}")
 
-subprocess.run("uv run yt-dlp --output \"%(title)s.%(ext)s\" --embed-thumbnail --add-metadata --merge-output-format mp4 " + url , shell=True, check=True)
+subprocess.run("uv run yt-dlp --cookies \'www.youtube.com_cookies.txt\' --output \"%(title)s.%(ext)s\" --embed-thumbnail --add-metadata --merge-output-format mp4 " + url , shell=True, check=True)
