@@ -194,6 +194,17 @@ def gen_summary():
                 print(f"All summary generation methods failed: {e3}")
                 return False
 
+def send_telegram(msg: str):
+    BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN_WHISPER']
+    CHAT_ID   = "6166024220"
+    import requests
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": msg}
+    r = requests.post(url, data=payload)
+    if not r.ok:
+        print("❌ 發送失敗：", r.text)
+
+
 def main():
     # Fix for Windows event loop policy
     import argparse
@@ -334,6 +345,10 @@ def main():
     #         print("Cleaned up temporary audio file")
     #     except:
     #         pass
+
+
+    send_telegram('finish whisper')
+
 
 if __name__ == "__main__":
     main()

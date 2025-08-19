@@ -37,7 +37,7 @@ model = WhisperForConditionalGeneration.from_pretrained("MediaTek-Research/Breez
 
 # 4. Build Pipeline
 asr_pipeline = AutomaticSpeechRecognitionPipeline(
-    model=model,
+    model=model,ㄧ
     tokenizer=processor.tokenizer,
     feature_extractor=processor.feature_extractor,
     chunk_length_s=0
