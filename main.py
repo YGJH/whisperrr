@@ -94,7 +94,7 @@ def gen_summary():
         print("import successful")
         genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
         
-        model = genai.GenerativeModel('gemini-2.5-pro')
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
         
         with open('transcribe.txt', 'r', encoding='utf-8') as f:
             text = f.read()
@@ -103,27 +103,35 @@ def gen_summary():
         prompt = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
         response = model.generate_content(prompt)
 
-        with open('summary.md', 'w', encoding='utf-8') as f:
-            f.write(response.text)
-        print("Summary generated and saved to summary.md")
-        return True
+        # 新版本的 API 需要檢查 response 是否有效
+        if response.candidates and len(response.candidates) > 0:
+            candidate = response.candidates[0]
+            if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                summary_text = candidate.content.parts[0].text
+                with open('summary.md', 'w', encoding='utf-8') as f:
+                    f.write(summary_text)
+                print("Summary generated and saved to summary.md")
+                return True
+            else:
+                raise Exception("No content parts in response")
+        else:
+            raise Exception("No candidates in response")
+            
     except Exception as e:
         print(f"Gemini API failed: {e}")
         try:
             print("Trying Ollama fallback...")
             import torch
             if torch.cuda.is_available():
-                from ollama import Ollama
-                client = Ollama()
+                import ollama
+                client = ollama.Client()
                 with open('transcribe.txt', 'r', encoding='utf-8') as f:
                     text = f.read()
                 print("Generating summary with Ollama...")
-                text = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
+                prompt = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
                 response = client.chat(
                     model="deepseek-r1:7b",
-                    messages=[{"role": "user", "content": text}],
-                    max_tokens=1000,
-                    temperature=0.5
+                    messages=[{"role": "user", "content": prompt}]
                 )
                 with open('summary.md', 'w', encoding='utf-8') as f:
                     f.write(response['message']['content'])
