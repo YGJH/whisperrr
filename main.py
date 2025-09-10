@@ -343,9 +343,18 @@ def main():
     if copy:
         path = os.getenv('pCloud_Path')
         print(f'copy summary.md to {path}')
-        cmd = 'cp summary.md ' + path + 'documents/obsidian/summary.md'  
-        print(cmd)
-        subprocess.run(cmd, shell=True, check=True)
+        import platform
+        if platform.system() == 'Linux':
+            cmd = 'cp summary.md ' + path + 'documents/obsidian/summary.md'  
+            subprocess.run(cmd, shell=True, check=True)
+        elif platform.system() == 'Windows':
+            cmd = 'cp summary.md ' + path + 'P:\\documents\\obsidian\\'
+            subprocess.run(cmd, shell=True, check=True)
+        else:
+            print("We don't have this man here")
+
+
+        
     # Clean up temporary audio file if it was downloaded/converted
     # if audio_file in ["audio.mp3"] and audio_file != video:
     #     try:
