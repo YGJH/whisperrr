@@ -130,7 +130,7 @@ def gen_summary():
                 print("Generating summary with Ollama...")
                 prompt = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
                 response = client.chat(
-                    model="deepseek-r1:7b",
+                    model="qwen3:8b",
                     messages=[{"role": "user", "content": prompt}]
                 )
                 with open('summary.md', 'w', encoding='utf-8') as f:
@@ -202,8 +202,37 @@ def gen_summary():
                 print(f"All summary generation methods failed: {e3}")
                 return False
 
+
+def wait_for_pcloud_mount():
+    """等待 pCloud 挂载完成"""
+    mount_path = '/home/charles/pCloudDrive'
+    target_dir = '/home/charles/pCloudDrive/documents/obsidian/'
+    
+    print("Starting pCloud...")
+    # 使用 Popen 启动 pCloud，但不等待它完成
+    process = subprocess.Popen(['/home/charles/Downloads/pcloud'])
+    
+    # 等待挂载点出现
+    max_attempts = 30  # 最多等待60秒 (30 * 2秒)
+    for attempt in range(max_attempts):
+        if os.path.ismount(mount_path) or os.path.exists(target_dir):
+            print(f"pCloud mounted successfully after {attempt * 2} seconds")
+            return True
+        
+        print(f"Waiting for pCloud mount... ({attempt * 2}s)")
+        time.sleep(2)
+    
+    print("Timeout: pCloud failed to mount within expected time")
+    return False
+
+
 def send_telegram(msg: str):
-    BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN_WHISPER']
+    try:
+        BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN_WHISPER']
+    except KeyError:
+        print("❌ TELEGRAM_BOT_TOKEN_WHISPER not set")
+        return
+
     CHAT_ID   = "6166024220"
     import requests
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -341,15 +370,26 @@ def main():
         print("Generating summary...")
         gen_summary()
     if copy:
-        path = os.getenv('pCloud_Path')
-        print(f'copy summary.md to {path}')
         import platform
+        import shutil
         if platform.system() == 'Linux':
-            cmd = 'cp summary.md ' + path + 'documents/obsidian/summary.md'  
-            subprocess.run(cmd, shell=True, check=True)
+            try:
+                shutil.copy('summary.md', '/home/charles/pCloudDrive/documents/obsidian/summary.md')
+                print("File copied successfully")
+            except Exception as e:
+                print(f"Initial copy failed: {e}")
+                
+                if wait_for_pcloud_mount():
+                    try:
+                        shutil.copy('summary.md', '/home/charles/pCloudDrive/documents/obsidian/summary.md')
+                        print("File copied successfully after pCloud mount")
+                    except Exception as e2:
+                        print(f"Copy failed even after mounting: {e2}")
+                else:
+                    print("Could not mount pCloud, copy operation failed")
+                    
         elif platform.system() == 'Windows':
-            cmd = 'cp summary.md ' + path + 'P:\\documents\\obsidian\\'
-            subprocess.run(cmd, shell=True, check=True)
+            shutil.copy('summary.md', 'P:\\documents\\obsidian\\summary.md')
         else:
             print("We don't have this man here")
 
