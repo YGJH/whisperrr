@@ -14,33 +14,53 @@ import time
 
 from yt_dlp import YoutubeDL
 
-def download_audio(url, output_file="audio"):
+def download_audio(url, output_file="audio.mp3"):
+    # 更穩定的 yt-dlp 選項
     ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': output_file,
+        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'outtmpl': 'audio.%(ext)s',  # 確保有 ext
+        'noplaylist': True,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '0',
         }],
+        'prefer_ffmpeg': True,
         'nocheckcertificate': True,
-        'prefer_insecure': True,
+        'no_warnings': True,
+        'quiet': False,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                          '(KHTML, like Gecko) Chrome/115.0 Safari/537.36'
+        }
     }
+    # 如果有 cookie 檔就自動使用
+    cookie_path = 'www.youtube.com_cookies.txt'
+    if os.path.exists(cookie_path):
+        ydl_opts['cookiefile'] = cookie_path
+
     try:
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
+        # 下載後 ffmpeg 會轉成 audio.mp3（postprocessor）
         return True
     except Exception as e:
         print(f"Download failed: {e}")
         try:
-            print("Trying fallback with yt-dlp...")
-            cmd = f'uv run yt-dlp --output \"audio.mp3\" --embed-thumbnail --extract-audio --audio-format mp3 --audio-quality 320K {url}'
-            # cmd = cmd.split()
+            print("Trying fallback with yt-dlp CLI...")
+            # CLI fallback 加上常見可解決 SABR/格式問題的參數
+            cmd = (
+                'uv run yt-dlp --no-playlist --no-check-certificate '
+                '--allow-unplayable-formats --output "audio.%(ext)s" '
+                '--extract-audio --audio-format mp3 --audio-quality 320K '
+                f'{url}'
+            )
             subprocess.run(cmd, shell=True, check=True)
             return True
         except subprocess.CalledProcessError as e:
             print(f"Fallback download failed: {e}")
         return False
+
 def convert_mp4_to_audio(video_path, output_file="audio.mp3"):
     """Convert MP4 to audio using ffmpeg"""
     try:
