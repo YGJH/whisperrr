@@ -12,6 +12,7 @@ dependencies = [
     "google-generativeai>=0.8.5",
     "googletrans>=4.0.2",
     "ollama>=0.5.3",
+    "openai>=1.109.1",
     "openai-whisper>=20250625",
     "pyinstaller>=6.15.0",
     "torchaudio>=2.7.1",

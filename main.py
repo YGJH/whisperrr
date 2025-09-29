@@ -106,48 +106,105 @@ async def translate_texts_batch(texts, dest='zh-TW', batch_size=10):
     
     return all_translations
 
-
-def gen_summary():
+def gen_summary(model='openai'):
+    # Try OpenAI first, then Gemini -> Ollama -> CPU fallback
     try:
-        print("api key = ", os.getenv('GEMINI_API_KEY'))
+        OPENAI_API_KEY = os.getenv('OPENAI_API_KEY2')
+        if not OPENAI_API_KEY:
+            OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+
+        if OPENAI_API_KEY and model=='openai':
+            try:
+                # Use the modern openai client (openai>=1.0.0)
+                from openai import OpenAI
+                client = OpenAI(api_key=OPENAI_API_KEY)
+
+                with open('transcribe.txt', 'r', encoding='utf-8') as f:
+                    text = f.read()
+
+                system_prompt = "你是一個會將轉錄文字詳細總結成中文的助理，請用繁體中文回覆。"
+                user_prompt = "請幫我總結以下影片內容，越詳細越好，並且用中文+markdown格式回覆我。\n\n" + text
+
+                # Try progressive model choices
+                openai_models = ["gpt-4o" , "gpt-4o-mini", "gpt-4", "gpt-3.5-turbo"]
+                resp = None
+                for m in openai_models:
+                    try:
+                        print(f"Trying OpenAI model: {m}")
+                        resp = client.chat.completions.create(
+                            model=m,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt}
+                            ],
+                            temperature=0.2,
+                            max_tokens=15000
+                        )
+                        break
+                    except Exception as inner_e:
+                        print(f"Model {m} failed: {inner_e}")
+                        resp = None
+
+                if resp is not None:
+                    # New client returns objects with attribute access
+                    try:
+                        summary_text = resp.choices[0].message.content.strip()
+                    except Exception:
+                        # Fallback if structure differs
+                        summary_text = str(resp)
+
+                    with open('summary.md', 'w', encoding='utf-8') as f:
+                        f.write(summary_text)
+                    print("Summary generated via OpenAI and saved to summary.md")
+                    return True
+                else:
+                    print("All configured OpenAI models failed, falling back")
+            except Exception as e:
+                print(f"OpenAI API failed: {e}")
+        else:
+            print("OPENAI_API_KEY not set, skipping OpenAI")
+    except Exception as e:
+        print(f"OpenAI block error: {e}")
+
+    # Fallback 1: Gemini
+    try:
+        print("Trying Gemini fallback...")
         import google.generativeai as genai
-        print("import successful")
         genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-        
         model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        
+
         with open('transcribe.txt', 'r', encoding='utf-8') as f:
             text = f.read()
 
-        print("Generating summary...")
         prompt = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
         response = model.generate_content(prompt)
 
-        # 新版本的 API 需要檢查 response 是否有效
         if response.candidates and len(response.candidates) > 0:
             candidate = response.candidates[0]
             if hasattr(candidate.content, 'parts') and candidate.content.parts:
                 summary_text = candidate.content.parts[0].text
                 with open('summary.md', 'w', encoding='utf-8') as f:
                     f.write(summary_text)
-                print("Summary generated and saved to summary.md")
+                print("Summary generated with Gemini and saved to summary.md")
                 return True
             else:
-                raise Exception("No content parts in response")
+                raise Exception("No content parts in Gemini response")
         else:
-            raise Exception("No candidates in response")
-            
+            raise Exception("No candidates in Gemini response")
     except Exception as e:
         print(f"Gemini API failed: {e}")
-        try:
-            print("Trying Ollama fallback...")
-            import torch
-            if torch.cuda.is_available():
+
+    # Fallback 2: Ollama (CUDA) or CPU simple summary
+    try:
+        print("Trying Ollama fallback...")
+        import torch
+        if torch.cuda.is_available():
+            try:
                 import ollama
                 client = ollama.Client()
                 with open('transcribe.txt', 'r', encoding='utf-8') as f:
                     text = f.read()
-                print("Generating summary with Ollama...")
                 prompt = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
                 response = client.chat(
                     model="qwen3:8b",
@@ -155,73 +212,55 @@ def gen_summary():
                 )
                 with open('summary.md', 'w', encoding='utf-8') as f:
                     f.write(response['message']['content'])
-                print("Summary generated and saved to summary.md")
+                print("Summary generated with Ollama and saved to summary.md")
                 return True
-            else:
-                print("CUDA not available, trying CPU-based summary...")
-                # Simple fallback - create a basic summary from the transcription
-                with open('transcribe.txt', 'r', encoding='utf-8') as f:
-                    text = f.read()
-                
-                # Create a simple summary by taking first few lines and key points
-                lines = text.split('\n')
-                summary_lines = []
-                summary_lines.append("=== 影片內容摘要 ===")
-                summary_lines.append("(由於API限制，這是基於轉錄文字的簡單摘要)")
-                summary_lines.append("")
-                
-                # Take first 5 lines as introduction
-                for i, line in enumerate(lines[:5]):
-                    if line.strip():
-                        summary_lines.append(f"• {line.strip()}")
-                
-                summary_lines.append("")
-                summary_lines.append("=== 主要內容 ===")
-                
-                # Take some key lines from the middle and end
-                mid_point = len(lines) // 2
-                for i in range(mid_point, min(mid_point + 3, len(lines))):
-                    if lines[i].strip():
-                        summary_lines.append(f"• {lines[i].strip()}")
-                
-                if len(lines) > 10:
-                    summary_lines.append("")
-                    summary_lines.append("=== 結論部分 ===")
-                    for line in lines[-3:]:
-                        if line.strip():
-                            summary_lines.append(f"• {line.strip()}")
-                
-                summary_text = '\n'.join(summary_lines)
-                with open('summary.md', 'w', encoding='utf-8') as f:
-                    f.write(summary_text)
-                print("Basic summary generated and saved to summary.md")
-                return True
-        except Exception as e2:
-            print(f"Ollama fallback also failed: {e2}")
-            print("Creating basic summary from transcription...")
-            try:
-                with open('transcribe.txt', 'r', encoding='utf-8') as f:
-                    text = f.read()
-                
-                lines = text.split('\n')
-                summary_lines = []
-                summary_lines.append("=== 影片內容摘要 ===")
-                summary_lines.append("(自動生成的基本摘要)")
-                summary_lines.append("")
-                
-                for i, line in enumerate(lines):
-                    if line.strip() and i % 3 == 0:  # Take every 3rd line
-                        summary_lines.append(f"• {line.strip()}")
-                
-                summary_text = '\n'.join(summary_lines)
-                with open('summary.md', 'w', encoding='utf-8') as f:
-                    f.write(summary_text)
-                print("Basic summary generated and saved to summary.md")
-                return True
-            except Exception as e3:
-                print(f"All summary generation methods failed: {e3}")
-                return False
+            except Exception as e:
+                print(f"Ollama (CUDA) attempt failed: {e}")
+        else:
+            print("CUDA not available for Ollama, will use CPU fallback")
+    except Exception as e:
+        print(f"Ollama check failed: {e}")
 
+    # Final fallback: simple CPU-based summary from transcription
+    try:
+        print("Creating basic summary from transcription (CPU fallback)...")
+        with open('transcribe.txt', 'r', encoding='utf-8') as f:
+            text = f.read()
+
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        summary_lines = []
+        summary_lines.append("=== 影片內容摘要 ===")
+        summary_lines.append("(由於 API 不可用，這是基於轉錄文字的簡單摘要)")
+        summary_lines.append("")
+
+        # intro: first 5 non-empty lines
+        for line in lines[:5]:
+            summary_lines.append(f"• {line}")
+
+        summary_lines.append("")
+        summary_lines.append("=== 主要內容摘錄 ===")
+
+        # middle samples
+        if lines:
+            mid = len(lines) // 2
+            for line in lines[mid: mid + 5]:
+                summary_lines.append(f"• {line}")
+
+        # conclusion: last 3 lines
+        if len(lines) > 3:
+            summary_lines.append("")
+            summary_lines.append("=== 結論 ===")
+            for line in lines[-3:]:
+                summary_lines.append(f"• {line}")
+
+        summary_text = '\n'.join(summary_lines)
+        with open('summary.md', 'w', encoding='utf-8') as f:
+            f.write(summary_text)
+        print("Basic summary generated and saved to summary.md")
+        return True
+    except Exception as e:
+        print(f"All summary generation methods failed: {e}")
+        return False
 
 def wait_for_pcloud_mount():
     """等待 pCloud 挂载完成"""
@@ -270,8 +309,10 @@ def main():
     parser.add_argument('--summary', action='store_true', help="Generate summary of the transcription")
     parser.add_argument('--video', nargs='?', help="Video URL or file path to transcribe")
     parser.add_argument('--copy', action='store_true', help='copy summary to pcloud')
+    parser.add_argument('--model', default='openai', help='use specific model for transcription')
     
     args = parser.parse_args()
+    model   = args.model
     video = args.video
     summary = args.summary
     copy = args.copy
@@ -388,7 +429,7 @@ def main():
     
     if summary:
         print("Generating summary...")
-        gen_summary()
+        gen_summary(model=model)
     if copy:
         import platform
         import shutil
