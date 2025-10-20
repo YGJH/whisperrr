@@ -12,7 +12,9 @@ dist/
 *.rs
 main.spec
 *.txt
-
+*.srt
+*.m4a
+*.mp4
 
 *.txt
 

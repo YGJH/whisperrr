@@ -14,17 +14,13 @@ import time
 
 from yt_dlp import YoutubeDL
 
-def download_audio(url, output_file="audio.mp3"):
-    # 更穩定的 yt-dlp 選項
+def download_audio(url, output_file="audio.mp4"):
+    # 更穩定的 yt-dlp 選項 - 下載 MP4 視頻
     ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': 'audio.%(ext)s',  # 確保有 ext
         'noplaylist': True,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '0',
-        }],
+        'merge_output_format': 'mp4',  # 合併為 mp4
         'prefer_ffmpeg': True,
         'nocheckcertificate': True,
         'no_warnings': True,
@@ -42,17 +38,18 @@ def download_audio(url, output_file="audio.mp3"):
     try:
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        # 下載後 ffmpeg 會轉成 audio.mp3（postprocessor）
+        # 下載後會是 audio.mp4
         return True
     except Exception as e:
         print(f"Download failed: {e}")
         try:
             print("Trying fallback with yt-dlp CLI...")
-            # CLI fallback 加上常見可解決 SABR/格式問題的參數
+            # CLI fallback 下載 MP4 視頻
             cmd = (
                 'uv run yt-dlp --no-playlist --no-check-certificate '
                 '--allow-unplayable-formats --output "audio.%(ext)s" '
-                '--extract-audio --audio-format mp3 --audio-quality 320K '
+                '--format "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" '
+                '--merge-output-format mp4 '
                 f'{url}'
             )
             subprocess.run(cmd, shell=True, check=True)
@@ -106,8 +103,12 @@ async def translate_texts_batch(texts, dest='zh-TW', batch_size=10):
     
     return all_translations
 
-def gen_summary(model='openai'):
+def gen_summary(model='openai', system_prompt=None):
     # Try OpenAI first, then Gemini -> Ollama -> CPU fallback
+    # Default system prompt if none provided
+    if system_prompt is None:
+        system_prompt = "你是一個會將轉錄文字詳細總結成中文的助理，請用繁體中文回覆。"
+    
     try:
         OPENAI_API_KEY = os.getenv('OPENAI_API_KEY2')
         if not OPENAI_API_KEY:
@@ -123,7 +124,6 @@ def gen_summary(model='openai'):
                 with open('transcribe.txt', 'r', encoding='utf-8') as f:
                     text = f.read()
 
-                system_prompt = "你是一個會將轉錄文字詳細總結成中文的助理，請用繁體中文回覆。"
                 user_prompt = "請幫我總結以下影片內容，越詳細越好，並且用中文+markdown格式回覆我。\n\n" + text
 
                 # Try progressive model choices
@@ -172,7 +172,8 @@ def gen_summary(model='openai'):
         print("Trying Gemini fallback...")
         import google.generativeai as genai
         genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-2.0-flash-exp', 
+                                       system_instruction=system_prompt)
 
         with open('transcribe.txt', 'r', encoding='utf-8') as f:
             text = f.read()
@@ -299,7 +300,11 @@ def send_telegram(msg: str):
     r = requests.post(url, data=payload)
     if not r.ok:
         print("❌ 發送失敗：", r.text)
-
+def format_timestamp(seconds):
+    """Format seconds to SRT timestamp format"""
+    millis = int((seconds - int(seconds)) * 1000)
+    time_struct = time.gmtime(int(seconds))
+    return f"{time_struct.tm_hour:02}:{time_struct.tm_min:02}:{time_struct.tm_sec:02},{millis:03}"
 
 def main():
     # Fix for Windows event loop policy
@@ -310,12 +315,14 @@ def main():
     parser.add_argument('--video', nargs='?', help="Video URL or file path to transcribe")
     parser.add_argument('--copy', action='store_true', help='copy summary to pcloud')
     parser.add_argument('--model', default='openai', help='use specific model for transcription')
+    parser.add_argument('--system-prompt', default=None, help='Custom system prompt for AI summary generation')
     
     args = parser.parse_args()
     model   = args.model
     video = args.video
     summary = args.summary
     copy = args.copy
+    system_prompt = args.system_prompt
     if sys.platform.startswith('win'):
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     
@@ -338,13 +345,15 @@ def main():
             video = "https://www.youtube.com/watch?v" + video.split('?v')[-1]
         if '&' in video:
             video = video.split('&')[0]
-        print(f"Downloading audio from URL: {video}")
+        print(f"Downloading video from URL: {video}")
         if download_audio(video):
-            audio_file = "audio.mp3"
+            video = 'audio.mp4'
         else:
-            print("Failed to download audio")
+            print("Failed to download video")
             sys.exit(1)
-    elif video.endswith(".mp4"):
+
+
+    if video.endswith(".mp4"):
         if convert_mp4_to_audio(video):
             audio_file = "audio.mp3"
         else:
@@ -368,6 +377,15 @@ def main():
         print(f"Transcription failed: {e}")
         sys.exit(1)
     
+
+    with open('subtitle.srt', 'w', encoding='utf-8') as f:
+        for original in result.get("segments", []):
+            start = original['start']
+            end = original['end']
+            text = original['text'].strip()
+            f.write(f"{format_timestamp(start)} --> {format_timestamp(end)}\n")
+            f.write(f"{text}\n\n")
+
     # Detect language and decide whether to translate
     detected_lang = result.get("language", "")
     print(f"Detected language: {detected_lang}")
@@ -424,12 +442,10 @@ def main():
 
     with open('transcribe.txt', 'w', encoding='utf-8') as f:
         for idx, original in enumerate(texts):
-            f.write(f"{original}\n")
-
-    
+            f.write(f"{original}\n")            
     if summary:
         print("Generating summary...")
-        gen_summary(model=model)
+        gen_summary(model=model, system_prompt=system_prompt)
     if copy:
         import platform
         import shutil
