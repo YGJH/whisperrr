@@ -1,0 +1,18 @@
+[Unit]
+Description=Whisperrr (runwhisper)
+After=network.target
+
+[Service]
+Type=simple
+User=charles
+WorkingDirectory=/home/charles/Documents/whisperrr
+# Use the wrapper (if you copied it to /usr/local/bin/runwhisper)
+ExecStart=/usr/local/bin/runwhisper
+Restart=on-failure
+RestartSec=5s
+
+# Ensure environment is minimal but includes path to node/python if needed
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target

@@ -15,7 +15,9 @@ main.spec
 *.srt
 *.m4a
 *.mp4
-
+.next/
+node_modules/
+jobs/
 *.txt
 
 # Virtual environments

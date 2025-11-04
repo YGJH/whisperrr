@@ -1,0 +1,29 @@
+#!/bin/bash
+# Wrapper to run the whisperrr run.sh from anywhere.
+# It uses absolute project path and tries to activate a virtualenv if present.
+
+PROJECT_DIR="/home/charles/Documents/whisperrr"
+RUNNER="$PROJECT_DIR/run.sh"
+
+# Exit if project dir missing
+if [ ! -d "$PROJECT_DIR" ]; then
+  echo "Project directory not found: $PROJECT_DIR" >&2
+  exit 2
+fi
+
+cd "$PROJECT_DIR" || exit 1
+
+# Try to activate common virtualenv locations
+if [ -f "$PROJECT_DIR/venv/bin/activate" ]; then
+  # shellcheck disable=SC1090
+  source "$PROJECT_DIR/venv/bin/activate"
+elif [ -f "$PROJECT_DIR/.venv/bin/activate" ]; then
+  # shellcheck disable=SC1090
+  source "$PROJECT_DIR/.venv/bin/activate"
+fi
+
+# Ensure node local bin on PATH (if you installed node modules locally)
+export PATH="$PROJECT_DIR/node_modules/.bin:$PATH"
+
+# Run the script with the same arguments. Use exec so signals propagate.
+exec "$RUNNER" "$@"
