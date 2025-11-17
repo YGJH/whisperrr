@@ -60,7 +60,9 @@ def write_progress(stage, percent=None, message=None):
 def _get_ydl_options(cookie_path):
     """Get yt-dlp options with Android client configuration."""
     opts = {
-        'format': 'bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
+        # Request the best available video + best audio, fall back to best
+        # This lets yt-dlp automatically pick the highest resolution available.
+        'format': 'bestvideo+bestaudio/best',
         'outtmpl': 'audio.%(ext)s',
         'noplaylist': True,
         'merge_output_format': 'mp4',
@@ -100,9 +102,12 @@ def _create_progress_hook():
                 
                 filename = d.get('filename', '')
                 if not filename:
-                    info = d.get('info_dict', {})
+                    info = d.get('info_dict')
+                    # info_dict can be a string or dict, handle both cases
                     if isinstance(info, dict):
                         filename = info.get('title', '')
+                    elif isinstance(info, str):
+                        filename = info
                 
                 write_progress('download', percent, filename or 'downloading')
             
@@ -137,7 +142,7 @@ def _try_cli_download(url, cookie_path):
         cmd = (
             f'yt-dlp --no-playlist '
             f'--extractor-args "youtube:player_client=android,web" '
-            f'--format "(bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b)" '
+                f'--format "bestvideo+bestaudio/best" '
             f'--merge-output-format mp4 '
             f'--output "audio.%(ext)s" '
             f'--user-agent "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip" '
@@ -168,7 +173,8 @@ def _try_audio_only_download(url, cookie_path):
         cmd = (
             f'yt-dlp --no-playlist '
             f'--extractor-args "youtube:player_client=android" '
-            f'--format "ba[ext=m4a]/ba/b" '
+            # For audio-only fallback request best audio
+            f'--format "bestaudio" '
             f'--output "audio.%(ext)s" '
             f'{cookie_arg} '
             f'"{url}"'
@@ -405,23 +411,64 @@ def _try_ollama_summary(text):
     try:
         print("Trying Ollama fallback...")
         import torch
-        
+        import gc
+
         if not torch.cuda.is_available():
             print("CUDA not available for Ollama")
             return None
-        
+
         import ollama
         client = ollama.Client()
-        
+
         prompt = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
         response = client.chat(
             model="qwen3:8b",
             messages=[{"role": "user", "content": prompt}]
         )
-        
+
         summary = response['message']['content']
         write_progress('summary', 100, 'ollama done')
         print("Summary generated with Ollama")
+
+        # Attempt best-effort cleanup to free VRAM and related resources.
+        try:
+            # Close or unload client if the API exposes those methods
+            if hasattr(client, 'close'):
+                try:
+                    client.close()
+                except Exception:
+                    pass
+            if hasattr(client, 'unload_model'):
+                try:
+                    client.unload_model()
+                except Exception:
+                    pass
+            if hasattr(ollama, 'unload'):
+                try:
+                    ollama.unload()
+                except Exception:
+                    pass
+        except Exception:
+            # Ignore cleanup errors but continue with explicit local cleanup
+            pass
+
+        # Delete large objects and force garbage collection + CUDA cache clear
+        try:
+            del response
+            del client
+            gc.collect()
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         return summary
     
     except Exception as e:
@@ -751,6 +798,17 @@ def main():
     
     # Write initial progress immediately
     write_progress('init', 0, 'starting job')
+    
+    # Unset all proxy environment variables directly in Python
+    # (Running a shell script won't affect the current process's environment)
+    proxy_vars = [
+        'http_proxy', 'https_proxy', 'ftp_proxy', 'socks_proxy', 'all_proxy',
+        'HTTP_PROXY', 'HTTPS_PROXY', 'FTP_PROXY', 'SOCKS_PROXY', 'ALL_PROXY',
+        'no_proxy', 'NO_PROXY'
+    ]
+    for var in proxy_vars:
+        os.environ.pop(var, None)
+    print("All proxy environment variables cleared")
     
     parser = argparse.ArgumentParser(description="Transcribe and translate audio from video files.")
     parser.add_argument('--summary', action='store_true', help="Generate summary of the transcription")
