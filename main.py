@@ -72,12 +72,7 @@ def _get_ydl_options(cookie_path):
         'quiet': False,
         'ignoreerrors': False,
         'geo_bypass': True,
-        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
-        'http_headers': {
-            'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
+        # 'extractor_args': {'youtube': {'player_client': ['ios', 'web', 'android']}},
     }
     
     if os.path.exists(cookie_path):
@@ -123,7 +118,7 @@ def _create_progress_hook():
 def _try_python_download(url, ydl_opts):
     """Attempt download using yt-dlp Python API."""
     try:
-        print("Attempting download with Android client...")
+        print("Attempting download with yt-dlp...")
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         print("Download successful!")
@@ -141,11 +136,10 @@ def _try_cli_download(url, cookie_path):
         
         cmd = (
             f'yt-dlp --no-playlist '
-            f'--extractor-args "youtube:player_client=android,web" '
+            # f'--extractor-args "youtube:player_client=ios,web,android" '
                 f'--format "bestvideo+bestaudio/best" '
             f'--merge-output-format mp4 '
             f'--output "audio.%(ext)s" '
-            f'--user-agent "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip" '
             f'{cookie_arg} '
             f'"{url}"'
         )
