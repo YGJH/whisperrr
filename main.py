@@ -72,7 +72,7 @@ def _get_ydl_options(cookie_path):
         'quiet': False,
         'ignoreerrors': False,
         'geo_bypass': True,
-        'extractor_args': 'youtube:player_client=android,web',
+        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
         'http_headers': {
             'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
             'Accept': '*/*',
@@ -387,7 +387,7 @@ def _try_gemini_summary(text, system_prompt):
         import google.generativeai as genai
         genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
         
-        model = genai.GenerativeModel('gemini-2.0-flash-exp', system_instruction=system_prompt)
+        model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=system_prompt)
         prompt = "請幫我總結以下影片內容，越詳細愈好，並且用中文回覆我。\n\n" + text
         response = model.generate_content(prompt)
         
@@ -567,17 +567,17 @@ def wait_for_gpu_memory(threshold_gb=5):
         time.sleep(1)
 
 
-def copy_to_pcloud(source_file):
+def copy_to_repository(source_file):
     """Copy file to pCloud Obsidian directory."""
     import platform
     import shutil
     
     if platform.system() != 'Linux':
         if platform.system() == 'Windows':
-            shutil.copy(source_file, 'P:\\documents\\obsidian\\summary.md')
+            shutil.copy(source_file, '..\\notes\\')
         return
     
-    target_path = '/home/charles/pCloudDrive/documents/obsidian/summary.md'
+    target_path = '../notes/summary.md'
     
     try:
         shutil.copy(source_file, target_path)
@@ -963,7 +963,7 @@ def main():
         print("Generating summary...")
         gen_summary(choice=choice, system_prompt=system_prompt)
     if copy:
-        copy_to_pcloud('summary.md')
+        copy_to_repository('summary.md')
 
         
     # Clean up temporary audio file if it was downloaded/converted
