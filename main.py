@@ -835,10 +835,6 @@ def main():
     print(f"Summary mode: {summary}")
     print(f"Processing: {video}")
     
-    # Initialize model
-    print("Loading Whisper model...")
-    model = whisper.load_model("turbo")
-    print('loading whisper model done')
     # Handle different input types
     audio_file = None
     
@@ -874,6 +870,11 @@ def main():
         print(f"Audio file not found: {audio_file}")
         sys.exit(1)
     
+    # Initialize model
+    print("Loading Whisper model...")
+    model = whisper.load_model("turbo")
+    print('loading whisper model done')
+
     # Transcribe audio
     print(f"Transcribing audio... {audio_file}")
     write_progress('transcribe', 0, 'starting')
