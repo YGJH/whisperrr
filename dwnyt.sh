@@ -1,4 +1,8 @@
 #!/bin/bash
 set -o pipefail
 cd ~/Documents/whisperrr
-uv run download_yt.py $1
+
+for url in "$@"; do
+    echo "Downloading $url..."
+    uv run download_yt.py "$url"
+done

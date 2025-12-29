@@ -14,8 +14,8 @@ def download_audio(url, output_file="audio.mp4"):
     Returns:
         bool: True if successful, False otherwise
     """
-    if os.path.exists(output_file):
-        os.remove(output_file)
+    # if os.path.exists(output_file):
+    #     os.remove(output_file)
 
     
     cookie_path = 'www.youtube.com_cookies.txt'
@@ -46,7 +46,7 @@ def _get_ydl_options(cookie_path):
         # Request the best available video + best audio, fall back to best
         # This lets yt-dlp automatically pick the highest resolution available.
         'format': 'bestvideo+bestaudio/best',
-        'outtmpl': 'audio.%(ext)s',
+        'outtmpl': '%(title).10s.%(ext)s',
         'noplaylist': True,
         'merge_output_format': 'mp4',
         'prefer_ffmpeg': True,
@@ -88,7 +88,7 @@ def _try_cli_download(url, cookie_path):
             # f'--extractor-args "youtube:player_client=ios,web,android" '
                 f'--format "bestvideo+bestaudio/best" '
             f'--merge-output-format mp4 '
-            f'--output "audio.%(ext)s" '
+            f'--output "%(title).10s.%(ext)s" '
             f'{cookie_arg} '
             f'"{url}"'
         )
