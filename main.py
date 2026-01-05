@@ -23,27 +23,19 @@ from yt_dlp import YoutubeDL
 # ============================================================================
 
 def write_progress(stage, percent=None, message=None):
-    """
-    Write progress information to JSON file for web UI.
-    
-    Args:
-        stage: Current processing stage (init, download, transcribe, translate, summary)
-        percent: Progress percentage (0-100)
-        message: Status message
-    """
+    """Write progress information to JSON file for web UI."""
     try:
         job_dir = os.environ.get('JOB_DIR', os.path.dirname(os.path.abspath(__file__)))
         os.makedirs(job_dir, exist_ok=True)
-        
+
         progress_file = os.path.join(job_dir, 'progress.json')
         data = {
             'stage': stage,
             'percent': percent,
             'message': message,
-            'ts': time.time()
+            'ts': time.time(),
         }
-        
-        # Atomic write via temp file
+
         tmp = progress_file + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
@@ -52,6 +44,7 @@ def write_progress(stage, percent=None, message=None):
         os.replace(tmp, progress_file)
     except Exception as e:
         print(f"Progress write error: {e}", file=sys.stderr)
+
 
 # ============================================================================
 # DOWNLOAD HELPERS
@@ -105,10 +98,10 @@ def _create_progress_hook():
                         filename = info
                 
                 write_progress('download', percent, filename or 'downloading')
-            
+
             elif status == 'finished':
                 write_progress('download', 100, 'finished')
-        
+
         except Exception as e:
             print(f"Progress hook error: {e}", file=sys.stderr)
     
@@ -145,10 +138,8 @@ def _try_cli_download(url, cookie_path):
         )
         
         print(f"Running: {cmd}")
-        write_progress('download', 0, 'cli start')
         result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
         print(result.stdout)
-        write_progress('download', 100, 'cli finished')
         print("Download successful via CLI!")
         return True
     except subprocess.CalledProcessError as e:
@@ -175,10 +166,8 @@ def _try_audio_only_download(url, cookie_path):
         )
         
         print(f"Running: {cmd}")
-        write_progress('download', 0, 'audio-only start')
         result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
         print(result.stdout)
-        write_progress('download', 100, 'audio finished')
         print("Audio download successful!")
         return True
     except subprocess.CalledProcessError as e:
@@ -202,7 +191,6 @@ def download_audio(url, output_file="audio.mp4"):
     if os.path.exists(output_file):
         os.remove(output_file)
 
-    write_progress('download', 0, 'starting')
     
     cookie_path = 'www.youtube.com_cookies.txt'
     
@@ -311,7 +299,6 @@ async def translate_texts_batch(texts, dest='zh-TW', batch_size=10):
         # Report progress
         processed = len(all_translations)
         percent = int(processed * 100 / total) if total > 0 else 0
-        write_progress('translate', percent, f'{processed}/{total}')
         
         # Delay between batches to avoid rate limiting
         if i + batch_size < len(texts):
@@ -332,7 +319,6 @@ def _try_openai_summary(text, system_prompt):
         return None
     
     try:
-        write_progress('summary', 5, 'trying openai')
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
         
@@ -344,7 +330,6 @@ def _try_openai_summary(text, system_prompt):
         for model in models:
             try:
                 print(f"Trying OpenAI model: {model}")
-                write_progress('summary', 10, f'trying {model}')
                 
                 response = client.chat.completions.create(
                     model=model,
@@ -357,7 +342,6 @@ def _try_openai_summary(text, system_prompt):
                 )
                 
                 summary = response.choices[0].message.content.strip()
-                write_progress('summary', 100, 'openai done')
                 print("Summary generated via OpenAI")
                 return f"\n{summary}"
             
@@ -376,7 +360,6 @@ def _try_openai_summary(text, system_prompt):
 def _try_gemini_summary(text, system_prompt):
     """Attempt to generate summary using Gemini API."""
     try:
-        write_progress('summary', 20, 'trying gemini')
         
         import google.generativeai as genai
         genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
@@ -389,7 +372,6 @@ def _try_gemini_summary(text, system_prompt):
             candidate = response.candidates[0]
             if hasattr(candidate.content, 'parts') and candidate.content.parts:
                 summary = candidate.content.parts[0].text
-                write_progress('summary', 100, 'gemini done')
                 print("Summary generated with Gemini")
                 return f"\n{summary}"
         
@@ -421,7 +403,6 @@ def _try_ollama_summary(text):
         )
 
         summary = response['message']['content']
-        write_progress('summary', 100, 'ollama done')
         print("Summary generated with Ollama")
 
         # Attempt best-effort cleanup to free VRAM and related resources.
@@ -476,7 +457,6 @@ def gen_summary(choice='openai', system_prompt=None):
     if system_prompt is None:
         system_prompt = "你是一個會將轉錄文字詳細總結成中文的助理，請用繁體中文回覆。"
     
-    write_progress('summary', 0, 'starting')
     
     # Read transcription
     try:
@@ -659,14 +639,11 @@ def transcribe_audio(model, audio_file):
         dict: Transcription result or None if failed
     """
     print(f"Transcribing audio: {audio_file}")
-    write_progress('transcribe', 0, 'starting')
     
     try:
         result = model.transcribe(audio_file, fp16=False, verbose=False)
-        write_progress('transcribe', 100, 'done')
         return result
     except Exception as e:
-        write_progress('transcribe', None, f'failed: {e}')
         print(f"Transcription failed: {e}")
         return None
 
@@ -791,7 +768,6 @@ def main():
     summary = False
     
     # Write initial progress immediately
-    write_progress('init', 0, 'starting job')
     
     # Unset all proxy environment variables directly in Python
     # (Running a shell script won't affect the current process's environment)
@@ -835,37 +811,55 @@ def main():
     print(f"Summary mode: {summary}")
     print(f"Processing: {video}")
     
+    def _convert_video_to_wav(input_path: str, output_path=None) -> str:
+        src_path = Path(input_path)
+        if output_path is None:
+            output_path = str(src_path.with_suffix('.wav'))
+
+        cmd = [
+            'ffmpeg',
+            '-y',
+            '-i', str(src_path),
+            '-vn',
+            '-acodec', 'pcm_s16le',
+            '-ar', '16000',
+            '-ac', '1',
+            output_path,
+        ]
+        subprocess.run(cmd, check=True)
+        return output_path
+
+    VIDEO_EXTS = {'.mp4', '.mkv', '.flv', '.avi', '.mov', '.webm', '.m4v', '.ts'}
+    AUDIO_EXTS = {'.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac'}
+
     # Handle different input types
-    audio_file = None
-    
+    if not video:
+        print("Please provide --video URL or file path")
+        sys.exit(1)
+
     if video.startswith("http://") or video.startswith("https://"):
-        # https://www.youtube.com/watch?v=Vz40rDiWnN8&t=150s
-        video = video.replace('\\' , '').strip()
-        print(video)
-        if '?v' in video:
-            video = "https://www.youtube.com/watch?v" + video.split('?v')[-1]
-        if '&' in video:
-            video = video.split('&')[0]
-        print(f"Downloading video from URL: {video}")
-        if download_audio(video):
-            video = 'audio.mp4'
-        else:
+        url = sanitize_url(video)
+        print(f"Downloading video from URL: {url}")
+        if not download_audio(url):
             print("Failed to download video")
             sys.exit(1)
-
-
-    if video.endswith(".mp4"):
-        if convert_mp4_to_audio(video):
-            audio_file = "audio.mp3"
-        else:
-            print("Failed to convert video")
-            sys.exit(1)
-    elif video.endswith((".mp3", ".wav", ".m4a")):
-        audio_file = video
+        # Always convert downloaded video/audio container to .wav
+        audio_file = _convert_video_to_wav('audio.mp4', 'audio.wav')
     else:
-        print("Please provide a valid video URL, .mp4, .mp3, .wav, or .m4a file.")
-        sys.exit(1)
-    
+        src_path = Path(video)
+        if not src_path.exists():
+            print(f"Input file not found: {video}")
+            sys.exit(1)
+
+        ext = src_path.suffix.lower()
+        if ext in AUDIO_EXTS:
+            audio_file = str(src_path)
+        elif ext in VIDEO_EXTS:
+            audio_file = _convert_video_to_wav(str(src_path))
+        else:
+            print("Please provide a valid video URL, or a media file (.mp4/.mkv/.flv/.avi/.mov/.webm/.m4v/.ts/.mp3/.wav/.m4a)")
+            sys.exit(1)
+
     if not os.path.exists(audio_file):
         print(f"Audio file not found: {audio_file}")
         sys.exit(1)
@@ -877,12 +871,9 @@ def main():
 
     # Transcribe audio
     print(f"Transcribing audio... {audio_file}")
-    write_progress('transcribe', 0, 'starting')
     try:
         result = model.transcribe(audio_file, fp16=False, verbose=False)
-        write_progress('transcribe', 100, 'done')
     except Exception as e:
-        write_progress('transcribe', None, f'failed: {e}')
         print(f"Transcription failed: {e}")
         sys.exit(1)
     
