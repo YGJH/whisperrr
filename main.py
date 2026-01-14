@@ -19,36 +19,33 @@ from yt_dlp import YoutubeDL
 
 
 # ============================================================================
-# PROGRESS TRACKING
-# ============================================================================
-
-def write_progress(stage, percent=None, message=None):
-    """Write progress information to JSON file for web UI."""
-    try:
-        job_dir = os.environ.get('JOB_DIR', os.path.dirname(os.path.abspath(__file__)))
-        os.makedirs(job_dir, exist_ok=True)
-
-        progress_file = os.path.join(job_dir, 'progress.json')
-        data = {
-            'stage': stage,
-            'percent': percent,
-            'message': message,
-            'ts': time.time(),
-        }
-
-        tmp = progress_file + '.tmp'
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, progress_file)
-    except Exception as e:
-        print(f"Progress write error: {e}", file=sys.stderr)
-
-
-# ============================================================================
 # DOWNLOAD HELPERS
 # ============================================================================
+
+
+def _guess_latest_downloaded_media_file(since_seconds: int = 15 * 60):
+    """Best-effort guess of the newest downloaded media file in the cwd."""
+    exts = {'.mp4', '.mkv', '.webm', '.m4a', '.opus', '.mp3', '.wav'}
+    now = time.time()
+    newest_path = None
+    newest_mtime = 0.0
+
+    for p in Path('.').iterdir():
+        try:
+            if not p.is_file():
+                continue
+            if p.suffix.lower() not in exts:
+                continue
+            st = p.stat()
+            if now - st.st_mtime > since_seconds:
+                continue
+            if st.st_mtime > newest_mtime:
+                newest_mtime = st.st_mtime
+                newest_path = str(p)
+        except Exception:
+            continue
+
+    return newest_path
 
 def _get_ydl_options(cookie_path):
     """Get yt-dlp options with Android client configuration."""
@@ -56,9 +53,11 @@ def _get_ydl_options(cookie_path):
         # Request the best available video + best audio, fall back to best
         # This lets yt-dlp automatically pick the highest resolution available.
         'format': 'bestvideo+bestaudio/best',
-        'outtmpl': 'audio.%(ext)s',
+        # Save as "<video title>.ext" (merged container will usually be .mp4)
+        'outtmpl': '%(title).200B.%(ext)s',
         'noplaylist': True,
         'merge_output_format': 'mp4',
+        'windowsfilenames': True,
         'prefer_ffmpeg': True,
         'nocheckcertificate': True,
         'no_warnings': False,
@@ -74,107 +73,162 @@ def _get_ydl_options(cookie_path):
     return opts
 
 
-def _create_progress_hook():
-    """Create a progress hook for yt-dlp downloads."""
-    def hook(d):
-        try:
-            if not isinstance(d, dict):
-                return
-            
-            status = d.get('status')
-            if status == 'downloading':
-                downloaded = d.get('downloaded_bytes', 0) or d.get('downloaded_bytes_estimate', 0) or 0
-                total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-                
-                percent = int(downloaded * 100 / total) if total > 0 else None
-                
-                filename = d.get('filename', '')
-                if not filename:
-                    info = d.get('info_dict')
-                    # info_dict can be a string or dict, handle both cases
-                    if isinstance(info, dict):
-                        filename = info.get('title', '')
-                    elif isinstance(info, str):
-                        filename = info
-                
-                write_progress('download', percent, filename or 'downloading')
-
-            elif status == 'finished':
-                write_progress('download', 100, 'finished')
-
-        except Exception as e:
-            print(f"Progress hook error: {e}", file=sys.stderr)
-    
-    return hook
 
 
 def _try_python_download(url, ydl_opts):
-    """Attempt download using yt-dlp Python API."""
+    """Attempt download using yt-dlp Python API.
+
+    Returns:
+        str | None: Downloaded filepath if successful, otherwise None
+    """
     try:
         print("Attempting download with yt-dlp...")
         with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        print("Download successful!")
-        return True
+            info = ydl.extract_info(url, download=True)
+
+            downloaded_path = None
+            if isinstance(info, dict):
+                # Prefer post-processed/moved filepath if present
+                req = info.get('requested_downloads')
+                if isinstance(req, list) and req:
+                    for item in req:
+                        if isinstance(item, dict) and item.get('filepath'):
+                            downloaded_path = item['filepath']
+                            break
+                if not downloaded_path:
+                    downloaded_path = info.get('filepath') or info.get('_filename')
+
+            if not downloaded_path:
+                try:
+                    downloaded_path = ydl.prepare_filename(info)
+                except Exception:
+                    downloaded_path = None
+
+        # If merge_output_format is set, the final file often ends with that extension.
+        merge_ext = ydl_opts.get('merge_output_format')
+        if downloaded_path and merge_ext and not os.path.exists(downloaded_path):
+            base, _ext = os.path.splitext(downloaded_path)
+            candidate = base + '.' + str(merge_ext)
+            if os.path.exists(candidate):
+                downloaded_path = candidate
+
+        if downloaded_path and os.path.exists(downloaded_path):
+            print(f"Download successful! File: {downloaded_path}")
+            return downloaded_path
+
+        guessed = _guess_latest_downloaded_media_file()
+        if guessed and os.path.exists(guessed):
+            print(f"Download successful! Guessed file: {guessed}")
+            return guessed
+
+        print("Download finished but could not determine output filename")
+        return None
     except Exception as e:
         print(f"Android client failed: {e}")
-        return False
+        return None
 
 
 def _try_cli_download(url, cookie_path):
-    """Attempt download using yt-dlp CLI."""
+    """Attempt download using yt-dlp CLI.
+
+    Returns:
+        str | None: Downloaded filepath if successful, otherwise None
+    """
     try:
         print("Trying CLI fallback...")
-        cookie_arg = f'--cookies "{cookie_path}"' if os.path.exists(cookie_path) else ''
-        
-        cmd = (
-            f'yt-dlp --no-playlist '
-            # f'--extractor-args "youtube:player_client=ios,web,android" '
-                f'--format "bestvideo+bestaudio/best" '
-            f'--merge-output-format mp4 '
-            f'--output "audio.%(ext)s" '
-            f'{cookie_arg} '
-            f'"{url}"'
-        )
-        
-        print(f"Running: {cmd}")
-        result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
-        print(result.stdout)
-        print("Download successful via CLI!")
-        return True
+        cmd = [
+            'yt-dlp',
+            '--no-playlist',
+            '--format', 'bestvideo+bestaudio/best',
+            '--merge-output-format', 'mp4',
+            '--output', '%(title).200B.%(ext)s',
+            '--windows-filenames',
+            '--print', 'after_move:filepath',
+        ]
+
+        if os.path.exists(cookie_path):
+            cmd.extend(['--cookies', cookie_path])
+
+        cmd.append(url)
+
+        print("Running: " + ' '.join(cmd))
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+        printed_lines = [ln.strip() for ln in (result.stdout or '').splitlines() if ln.strip()]
+        downloaded_path = printed_lines[-1] if printed_lines else None
+
+        # Validate / best-effort fallback
+        if downloaded_path and os.path.exists(downloaded_path):
+            print(f"Download successful via CLI! File: {downloaded_path}")
+            return downloaded_path
+
+        guessed = _guess_latest_downloaded_media_file()
+        if guessed and os.path.exists(guessed):
+            print(f"Download successful via CLI! Guessed file: {guessed}")
+            return guessed
+
+        if os.path.exists('audio.mp4'):
+            return 'audio.mp4'
+        if os.path.exists('audio.webm'):
+            return 'audio.webm'
+        print("Download successful via CLI, but could not validate output filename")
+        return downloaded_path
     except subprocess.CalledProcessError as e:
         print(f"CLI fallback failed: {e}")
         if hasattr(e, 'stderr') and e.stderr:
             print(f"stderr: {e.stderr}")
-        return False
+        return None
 
 
 def _try_audio_only_download(url, cookie_path):
-    """Attempt audio-only download as last resort."""
+    """Attempt audio-only download as last resort.
+
+    Returns:
+        str | None: Downloaded filepath if successful, otherwise None
+    """
     try:
         print("Final attempt: downloading audio only...")
-        cookie_arg = f'--cookies "{cookie_path}"' if os.path.exists(cookie_path) else ''
-        
-        cmd = (
-            f'yt-dlp --no-playlist '
-            f'--extractor-args "youtube:player_client=android" '
-            # For audio-only fallback request best audio
-            f'--format "bestaudio" '
-            f'--output "audio.%(ext)s" '
-            f'{cookie_arg} '
-            f'"{url}"'
-        )
-        
-        print(f"Running: {cmd}")
-        result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
-        print(result.stdout)
-        print("Audio download successful!")
-        return True
+        cmd = [
+            'yt-dlp',
+            '--no-playlist',
+            '--extractor-args', 'youtube:player_client=android',
+            '--format', 'bestaudio',
+            '--output', '%(title).200B.%(ext)s',
+            '--windows-filenames',
+            '--print', 'after_move:filepath',
+        ]
+
+        if os.path.exists(cookie_path):
+            cmd.extend(['--cookies', cookie_path])
+
+        cmd.append(url)
+
+        print("Running: " + ' '.join(cmd))
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+        printed_lines = [ln.strip() for ln in (result.stdout or '').splitlines() if ln.strip()]
+        downloaded_path = printed_lines[-1] if printed_lines else None
+        if downloaded_path and os.path.exists(downloaded_path):
+            print(f"Audio download successful! File: {downloaded_path}")
+            return downloaded_path
+
+        guessed = _guess_latest_downloaded_media_file()
+        if guessed and os.path.exists(guessed):
+            print(f"Audio download successful! Guessed file: {guessed}")
+            return guessed
+
+        # Fallback guesses
+        for candidate in ('audio.m4a', 'audio.webm', 'audio.opus', 'audio.mp3', 'audio.wav'):
+            if os.path.exists(candidate):
+                return candidate
+
+        print("Audio download successful, but could not validate output filename")
+        return downloaded_path
     except subprocess.CalledProcessError as e:
         print(f"Audio-only download failed: {e}")
         if hasattr(e, 'stderr') and e.stderr:
             print(f"stderr: {e.stderr}")
-        return False
+        return None
 
 
 def download_audio(url, output_file="audio.mp4"):
@@ -186,35 +240,48 @@ def download_audio(url, output_file="audio.mp4"):
         output_file: Output filename
         
     Returns:
-        bool: True if successful, False otherwise
+        str | None: Downloaded video/audio filepath if successful, otherwise None
     """
-    if os.path.exists(output_file):
-        os.remove(output_file)
+    # Filenames are title-based now (see outtmpl), so we generally don't know
+    # the final output filename upfront. Only delete when caller explicitly
+    # provides a concrete output path.
+    if output_file and output_file != "audio.mp4":
+        try:
+            if os.path.exists(output_file):
+                os.remove(output_file)
+        except Exception:
+            pass
 
     
     cookie_path = 'www.youtube.com_cookies.txt'
     
     # Strategy 1: Python API with Android client
     ydl_opts = _get_ydl_options(cookie_path)
-    ydl_opts['progress_hooks'] = [_create_progress_hook()]
+
+    # Allow overriding output template when the caller provides a concrete path
+    if output_file and output_file != "audio.mp4":
+        ydl_opts['outtmpl'] = output_file
     
-    if _try_python_download(url, ydl_opts):
-        return True
+    downloaded = _try_python_download(url, ydl_opts)
+    if downloaded:
+        return downloaded
     
     # Strategy 2: CLI fallback
-    if _try_cli_download(url, cookie_path):
-        return True
+    downloaded = _try_cli_download(url, cookie_path)
+    if downloaded:
+        return downloaded
     
     # Strategy 3: Audio-only fallback
-    if _try_audio_only_download(url, cookie_path):
-        return True
+    downloaded = _try_audio_only_download(url, cookie_path)
+    if downloaded:
+        return downloaded
     
     # All strategies failed
     print("\nAll download strategies failed. Please check:")
     print("1. Video URL is correct and accessible")
     print("2. Export cookies from your browser to www.youtube.com_cookies.txt")
     print("3. Update yt-dlp: pip install -U yt-dlp")
-    return False
+    return None
 
 
 def convert_mp4_to_audio(video_path, output_file="audio.mp3"):
@@ -840,11 +907,12 @@ def main():
     if video.startswith("http://") or video.startswith("https://"):
         url = sanitize_url(video)
         print(f"Downloading video from URL: {url}")
-        if not download_audio(url):
+        downloaded_path = download_audio(url)
+        if not downloaded_path:
             print("Failed to download video")
             sys.exit(1)
         # Always convert downloaded video/audio container to .wav
-        audio_file = _convert_video_to_wav('audio.mp4', 'audio.wav')
+        audio_file = _convert_video_to_wav(downloaded_path, 'audio.wav')
     else:
         src_path = Path(video)
         if not src_path.exists():
