@@ -946,7 +946,7 @@ def main():
         sys.exit(1)
     
 
-    with open('subtitle.srt', 'w', encoding='utf-8') as f:
+    with open(f'{Path(downloaded_path).stem}.srt', 'w', encoding='utf-8') as f:
         for original in result.get("segments", []):
             start = original['start']
             end = original['end']
@@ -975,7 +975,7 @@ def main():
                 translations = texts  # Use original text if translation fails
         
         # Write to file
-        output_file = "cn_subtitle.srt"
+        output_file = f'cn_{Path(downloaded_path).stem}.srt'
         print(f"Writing results to {output_file}...")
         
         with open(output_file, "w", encoding='utf-8') as f:
