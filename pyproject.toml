@@ -19,5 +19,5 @@ dependencies = [
     "pyinstaller>=6.15.0",
     "torchaudio>=2.7.1",
     "transformers>=4.53.2",
-    "yt-dlp>=2025.6.30",
+    "yt-dlp>=2026.1.29",
 ]

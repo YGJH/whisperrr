@@ -848,6 +848,7 @@ def main():
     print("All proxy environment variables cleared")
     
     parser = argparse.ArgumentParser(description="Transcribe and translate audio from video files.")
+    parser.add_argument('--whisper', default='large', help='use specific model for transcription')
     parser.add_argument('--summary', action='store_true', help="Generate summary of the transcription")
     parser.add_argument('--video', nargs='?', help="Video URL or file path to transcribe")
     parser.add_argument('--copy', action='store_true', help='copy summary to pcloud')
@@ -870,6 +871,7 @@ def main():
     video = args.video
     summary = args.summary
     copy = args.copy
+    whisper_model = args.whisper
     system_prompt = args.system_prompt
     if sys.platform.startswith('win'):
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -918,7 +920,7 @@ def main():
         if not src_path.exists():
             print(f"Input file not found: {video}")
             sys.exit(1)
-
+        downloaded_path = src_path.stem
         ext = src_path.suffix.lower()
         if ext in AUDIO_EXTS:
             audio_file = str(src_path)
@@ -934,7 +936,7 @@ def main():
     
     # Initialize model
     print("Loading Whisper model...")
-    model = whisper.load_model("turbo")
+    model = whisper.load_model(whisper_model)
     print('loading whisper model done')
 
     # Transcribe audio
